@@ -13,6 +13,10 @@ $(examples)
 
 Flags:
     --name <string>           Name of the microservice in Cumulocity
+    --force <bool>            Force updating the version if version in cumulocity.json is lower or equal than the manifest in the microservice on c8y
+    --snapshot <bool>         Adds "-Snapshot" to the version if not already included
+    --noUpload <bool>
+
 EOF
 }
 
@@ -22,6 +26,66 @@ Examples:
     c8y deploy microservice . --name new_Microservice
 EOF
 }
+
+increase_version(){
+manifestVersion=$(c8y microservices get --id "$name" --select manifest.version --output csv)
+echo "Found the following version of the manifest of microservice "$name" on cumulocity : $manifestVersion"
+
+version=$(cat cumulocity.json | jq -r '.version')
+echo "Found the following version of the manifest within the cumlocity.json: $version"
+
+
+if [ $version == $manifestVersion ]; then
+IFS='.' read -r -a version_parts <<< "$version"
+major=${version_parts[0]}
+major=$((major))
+echo "Major is: $major"
+minor=${version_parts[1]}
+minor=$((minor))
+echo "Minor is: $minor"
+patch=${version_parts[2]}
+patch=$((patch))
+echo "Patch is: $patch"
+
+echo "Need to increase the version"
+ # Increment the appropriate version component
+if [ -n "$patch" ]; then
+patch="$((patch+1))"
+echo "Increasing patch version part to: $patch"
+elif [ -n "$minor" ]; then
+minor="$((minor+1))"
+echo "Increasing minor version part to: $minor"
+elif [ -n "$major" ]; then
+major="$((major+1))"
+echo "Increasing major version part to: $major"
+else
+echo "No valid version schema detected, aborting"
+exit 1
+fi
+# Join the version components back together
+new_version="$major.$minor.$patch"
+echo "New version adds up to: $new_version, writing to cumulocity.json"
+jq --arg new_version "$new_version" '.version = $new_version' cumulocity.json > tmp.json && mv tmp.json cumulocity.json
+else
+echo "Nothing to do, since version in cumulocity.json is already higher"
+fi
+}
+
+add_snapshto_to_version(){
+version=$(cat cumulocity.json | jq -r '.version')
+echo "Found the following version of the manifest within the cumlocity.json: $version"
+
+if [[ ! $version =~ "-SNAPSHOT" ]]; then
+echo "Snapshot not included, will add"
+postfix="-SNAPSHOT"
+new_version="$version$postfix"
+echo "New version is: $new_version"
+jq --arg new_version "$new_version" '.version = $new_version' cumulocity.json > tmp.json && mv tmp.json cumulocity.json
+else
+echo "Snapshot is already included in Version"
+fi
+}
+
 
 # Print log messages on stderr so it does not mix with results which is generally printed on stdout
 echo "Running deploy microservice command" >&2
@@ -43,29 +107,43 @@ if [ ! -f cumulocity.json ]; then
     exit 1
 fi
 
-# Check if both arguments are provided
-if [ $# -lt 2 ]; then
-    echo "Usage: $0 <path> --name=<name>"
-    help
-    exit 1
-fi
-
 # Parse command-line arguments
 path=""
 name=""
+force=false
+noUpload=false
+snapshot=false
+
 
 for arg in "$@"; do
     case $arg in
         --name=*)
             name="${arg#*=}"
             ;;
-        *)
-            path="$arg"
+        --path=*)
+            path="${arg#*=}"
             ;;
+        --force=*)
+            force="${arg#*=}"
+            ;;
+        --noUpload=*)
+            noUpload="${arg#*=}"
+            ;;
+        --snapshot=*)
+            snapshot="${arg#*=}"
+            ;;
+        
     esac
 done
 
-# Validate required flag
+# Validate required flag path
+if [ -z "$path" ]; then
+    echo "Error: --path=<path> flag is required."
+    help
+    exit 1
+fi
+
+# Validate required flag name
 if [ -z "$name" ]; then
     echo "Error: --name=<name> flag is required."
     help
@@ -84,6 +162,16 @@ fi
 # Create a directory for the zip file
 temp_dir=$(mktemp -d)
 
+# check if version increase is  needed
+
+if [ $force == "true" ]; then
+increase_version
+fi
+
+if [ $snapshot == "true" ]; then
+add_snapshto_to_version
+fi
+
 # Copy cumulocity.json to the temp directory
 
 cp cumulocity.json "$temp_dir/"
@@ -98,3 +186,14 @@ zip -j "$name.zip" "$temp_dir/"*
 rm -rf "$temp_dir"
 
 echo "Docker image and Cumulocity.json have been zipped as $name.zip."
+
+
+if [ ! $noUpload == "true" ]; then
+c8y microservices create --file $name.zip
+echo "$name.zip has been uploaded."
+else
+echo "Upload was skipped."
+fi
+
+# if exist:
+#something else but increase version number with --force
