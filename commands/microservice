@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -e
+
+# Describe how to use your command
+help() {
+  cat <<EOF
+
+
+Usage:
+    c8y deploy microservice [FLAGS]
+
+$(examples)
+
+Flags:
+    --name <string>           Name of the microservice in Cumulocity
+EOF
+}
+
+examples () {
+  cat <<EOF
+Examples:
+    c8y deploy microservice . --name new_Microservice
+EOF
+}
+
+# Print log messages on stderr so it does not mix with results which is generally printed on stdout
+echo "Running deploy microservice command" >&2
+# Check if Docker is installed
+if ! command -v docker &> /dev/null; then
+    echo "Error: Docker is not installed."
+    exit 1
+fi
+
+# Check if the Dockerfile exists
+if [ ! -f Dockerfile ]; then
+    echo "Error: Dockerfile not found."
+    exit 1
+fi
+
+# Check if Cumulocity.json file exists
+if [ ! -f cumulocity.json ]; then
+    echo "Error: cumulocity.json file not found."
+    exit 1
+fi
+
+# Check if both arguments are provided
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <path> --name=<name>"
+    help
+    exit 1
+fi
+
+# Parse command-line arguments
+path=""
+name=""
+
+for arg in "$@"; do
+    case $arg in
+        --name=*)
+            name="${arg#*=}"
+            ;;
+        *)
+            path="$arg"
+            ;;
+    esac
+done
+
+# Validate required flag
+if [ -z "$name" ]; then
+    echo "Error: --name=<name> flag is required."
+    help
+    exit 1
+fi
+
+# Build the Docker image
+docker build -t "$name" -f Dockerfile --platform linux/amd64 "$path" 
+
+# Check if the Docker build was successful
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to build the Docker image."
+    exit 1
+fi
+
+# Create a directory for the zip file
+temp_dir=$(mktemp -d)
+
+# Copy cumulocity.json to the temp directory
+
+cp cumulocity.json "$temp_dir/"
+
+# Save the Docker image as a tar archive
+docker save "$name" -o "$temp_dir/image.tar"
+
+# Zip the Docker image and Cumulocity.json
+zip -j "$name.zip" "$temp_dir/"*
+
+# Clean up the temp directory
+rm -rf "$temp_dir"
+
+echo "Docker image and Cumulocity.json have been zipped as $name.zip."
