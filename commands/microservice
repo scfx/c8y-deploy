@@ -71,7 +71,7 @@ echo "Nothing to do, since version in cumulocity.json is already higher"
 fi
 }
 
-add_snapshto_to_version(){
+add_snapshot_to_version(){
 version=$(cat cumulocity.json | jq -r '.version')
 echo "Found the following version of the manifest within the cumlocity.json: $version"
 
@@ -169,7 +169,7 @@ increase_version
 fi
 
 if [ $snapshot == "true" ]; then
-add_snapshto_to_version
+add_snapshot_to_version
 fi
 
 # Copy cumulocity.json to the temp directory
